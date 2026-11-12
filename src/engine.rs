@@ -12,7 +12,7 @@ use ttfx::{
 };
 
 use crate::{
-    observer::Snapshot,
+    observer::{MAX_INPUT_BYTES, Snapshot},
     options::Options,
     vt::{self, Cell},
 };
@@ -119,6 +119,9 @@ impl Animation {
     pub fn take_started_effect(&mut self) -> Option<Snapshot> {
         if !std::mem::take(&mut self.effect_started) {
             return None;
+        }
+        if self.input.len() > MAX_INPUT_BYTES {
+            return Some(Snapshot::default());
         }
         Some(Snapshot {
             active: true,
@@ -253,6 +256,33 @@ fn terminal_config(options: &Options, cols: i32, rows: i32) -> TerminalConfig {
 #[cfg(test)]
 mod observer_tests {
     use super::*;
+
+    #[test]
+    fn published_input_is_bounded_in_bytes_without_changing_animation_input() {
+        let boundary = "é".repeat(MAX_INPUT_BYTES / 2);
+        for input in [
+            format!("{}x", "é".repeat(MAX_INPUT_BYTES / 2 - 1)),
+            boundary.clone(),
+            format!("{boundary}x"),
+        ] {
+            let options = Options {
+                effect: Some("print".into()),
+                seed: Some(42),
+                ..Options::default()
+            };
+            let mut animation = Animation::new(input.clone(), options, 40, 10).unwrap();
+            let snapshot = animation.take_started_effect().unwrap();
+            if input.len() <= MAX_INPUT_BYTES {
+                assert!(snapshot.active);
+                assert_eq!(snapshot.input, input);
+            } else {
+                assert_eq!(snapshot, Snapshot::default());
+            }
+            assert_eq!(animation.input, input);
+            assert!(animation.take_started_effect().is_none());
+        }
+    }
+
     #[test]
     fn completion_makes_one_new_description_available() {
         let options = Options {
